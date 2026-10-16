@@ -23,7 +23,7 @@ class HistoryTests(unittest.TestCase):
         history.initialize(self.db)
 
     def job(self, body=BODY, angle='门口双手拿早餐找钥匙', **changes):
-        result = dict(request_id=str(uuid.uuid4()), account='账号甲', product='棉布钥匙包', mode=5,
+        result = dict(request_id=str(uuid.uuid4()), account='账号甲', product='棉布钥匙包', mode=2,
                       source_topics=TOPICS, drafts=[dict(title='', body=body, topics=TOPICS, angle=angle,
                           variation=dict(scene='drawer' if body==OTHER else 'breakfast',
                                          focus='sorting' if body==OTHER else 'finding',structure='problem_choice'))])

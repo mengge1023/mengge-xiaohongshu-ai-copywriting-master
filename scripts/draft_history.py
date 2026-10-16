@@ -2,7 +2,7 @@
 """Local, cross-session draft checks. Python 3.9+, standard library only.
 
 Exit 0: requested operation succeeded; 2: duplicate; 3: unavailable/invalid;
-4: lexical checks passed, semantic review still required. No model/network calls.
+4: semantic review required; 5: content/format rejected. No model/network calls.
 """
 import argparse
 import datetime as dt
@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 import unicodedata
@@ -19,6 +20,7 @@ import uuid
 VERSION = 1
 MAX_HISTORY = 5000
 DEFAULT_DB = Path.home() / '.mengge-copywriting' / 'history.sqlite3'
+CONTRACT = json.loads((Path(__file__).resolve().parents[1] / 'references/mode-5-contract.json').read_text(encoding='utf-8'))
 
 
 def canonical(text):
@@ -118,6 +120,38 @@ def load_job(path, importing=False):
     return job
 
 
+def content_issues(job):
+    """Narrow deterministic checks from observed mode-5 failures, not semantic proof."""
+    if job['mode'] != 5:
+        return []
+    facts = job.get('product_facts', [])
+    known = {f.get('kind') for f in facts if isinstance(f, dict)
+             and f.get('status') in ('用户提供', '已核实', 'user_provided', 'verified')
+             and f.get('value') and f.get('source')}
+    issues = []
+    if not facts:
+        issues.append({'reason': 'missing_product_facts'})
+    bounds = job.get('body_length', {'min': 160, 'max': 210})
+    if (not isinstance(bounds, dict) or type(bounds.get('min')) is not int
+            or type(bounds.get('max')) is not int or not 1 <= bounds['min'] <= bounds['max'] <= 10000):
+        return [{'reason': 'invalid_body_length'}]
+    for i, draft in enumerate(job['drafts']):
+        body = draft['body']
+        count = len(re.findall(r'[\u4e00-\u9fff]', body))
+        if not bounds['min'] <= count <= bounds['max']:
+            issues.append({'draft_index': i, 'reason': 'body_length', 'hanzi': count, 'required': bounds})
+        if len(re.split(r'\n\s*\n', body.strip())) != 3:
+            issues.append({'draft_index': i, 'reason': 'paragraph_count'})
+        plan = draft.get('variation') or {}
+        if any(plan.get(axis) not in choices for axis, choices in CONTRACT['axes'].items()):
+            issues.append({'draft_index': i, 'reason': 'unknown_plan_id'})
+        for kind, pattern in CONTRACT['unsupported_claim_patterns'].items():
+            match = re.search(pattern, draft['title'] + '\n' + body)
+            if kind not in known and match:
+                issues.append({'draft_index': i, 'reason': 'unsupported_' + kind, 'quote': match.group()})
+    return issues
+
+
 def payload_hash(job):
     return digest({k: v for k, v in job.items() if k != 'semantic_review'})
 
@@ -159,7 +193,10 @@ def inspect(job, history):
             # thresholds. Stable, pre-generation axes prevent accepting the same plan again.
             new_plan, old_plan = draft.get('variation'), old.get('variation')
             if reason is None and new_plan and old_plan and (old in history[-20:] or isinstance(old['id'], str)):
-                changed = sum(label(new_plan[k]) != label(old_plan[k]) for k in ('scene','focus','structure'))
+                def plan_id(plan, axis):
+                    value = label(plan[axis])
+                    return CONTRACT['legacy_scene_aliases'].get(value, value) if axis == 'scene' else value
+                changed = sum(plan_id(new_plan, k) != plan_id(old_plan, k) for k in ('scene','focus','structure'))
                 if changed < 2: reason = 'reused_variation'
             info = {'draft_index': index, 'history_id': str(old['id']),
                     'sequence_ratio': round(seq, 4), 'ngram_dice': round(dice, 4),
@@ -171,16 +208,42 @@ def inspect(job, history):
                                                    variation=old.get('variation'))))
         neighbors.extend(v for _, v in sorted(ranked, key=lambda x: x[0], reverse=True)[:3])
     reviewed_ids = sorted({n['history_id'] for n in neighbors})
-    return {'status': 'duplicate' if blocked else 'lexical_pass',
+    issues = content_issues(job)
+    return {'status': 'content_rejected' if issues else 'duplicate' if blocked else 'lexical_pass',
             'payload_hash': payload_hash(job), 'history_checked': len(history),
             'batch_checked': len(job['drafts']), 'matches': blocked, 'neighbors': neighbors,
             'required_review_ids': reviewed_ids,
+            'content_issues': issues,
             'semantic_coverage': '最近历史由history读取；本次返回每稿最接近的3篇，需另做语义复核。',
             'platform_similarity_claim': False}
 
 
 def semantic_pass(job, result):
     review = job.get('semantic_review', {})
+    if job['mode'] == 5:
+        if review.get('facts_supported') is not True or review.get('distinct_content') is not True:
+            return False
+        evidence = review.get('comparison_evidence', [])
+        if not isinstance(evidence, list):
+            return False
+        allowed_pairs = {(n['history_id'], n['draft_index']) for n in result['neighbors']}
+        if (not isinstance(review.get('compared_ids'), list)
+                or set(review['compared_ids']) != set(result['required_review_ids'])
+                or any(not isinstance(e, dict) or (e.get('history_id'), e.get('draft_index')) not in allowed_pairs
+                       for e in evidence)):
+            return False
+        for neighbor in result['neighbors']:
+            draft = job['drafts'][neighbor['draft_index']]
+            if not any(isinstance(e, dict) and e.get('history_id') == neighbor['history_id']
+                       and e.get('draft_index') == neighbor['draft_index']
+                       and isinstance(e.get('old_quote'), str) and len(e['old_quote']) >= 8
+                       and e['old_quote'] in neighbor['body']
+                       and isinstance(e.get('new_quote'), str) and len(e['new_quote']) >= 8
+                       and e['new_quote'] in draft['body']
+                       and isinstance(e.get('changed_dimensions'), list)
+                       and set(e['changed_dimensions']) <= {'scene','focus','structure'}
+                       and len(set(e['changed_dimensions'])) >= 2 for e in evidence):
+                return False
     return (review.get('status') == 'passed' and review.get('payload_hash') == result['payload_hash']
             and isinstance(review.get('notes'), str) and len(review['notes'].strip()) >= 10
             and isinstance(review.get('compared_ids'), list)
@@ -201,6 +264,7 @@ def process(c, job, action):
         history = rows(c, job['account'], job['product'])
         result = inspect(job, history)
         if action != 'import':
+            if result['content_issues']: c.rollback(); return result, 5
             if result['matches']: c.rollback(); return result, 2
             if action == 'check': c.rollback(); return result, 0
             if not semantic_pass(job, result):

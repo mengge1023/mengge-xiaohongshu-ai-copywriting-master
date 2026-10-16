@@ -1,0 +1,39 @@
+{
+  "version": "1.2.1",
+  "axes": {
+    "scene": {
+      "daily_departure": "通勤出门与找随身物；出门前整理包也属此类",
+      "home_inventory": "在家清点现有物品、决定是否需要添置",
+      "bag_switch": "更换随身包时规划物品转移",
+      "before_purchase": "购买前核对自己的需要与商品条件",
+      "desk_arrangement": "桌面或抽屉中物品的分区安排",
+      "trip_preparation": "出行前拟定携带物品清单"
+    },
+    "focus": {
+      "fixed_location": "为物品安排固定位置以减少翻找",
+      "need_assessment": "先判断已有物品是否够用、是否需要添置",
+      "color_preference": "基于已知颜色说明个人审美选择",
+      "purchase_criteria": "围绕已知信息和待核条件做购买选择",
+      "sorting_habit": "先分类、归还、整理的行为习惯",
+      "packing_order": "规划物品装入、转移、取出的次序"
+    },
+    "structure": {
+      "question_criteria_choice": "提出选择问题、列出判断条件、做条件式选择",
+      "observation_comparison_preference": "观察已知特征、比较个人偏好、说明取舍",
+      "inventory_need_plan": "盘点已有物品、判断真正需要、提出计划",
+      "action_order_reason": "拟定一个动作、展开操作次序、说明原因"
+    }
+  },
+  "legacy_scene_aliases": {
+    "daily-commute-going-out": "daily_departure",
+    "home-prepare-going-out": "daily_departure"
+  },
+  "unsupported_claim_patterns": {
+    "price": "[零一二三四五六七八九十百千万几数\\d]+(?:[.．]\\d+)?(?:块钱|元|块)",
+    "size": "尺寸刚好|不占.{0,6}(?:地方|空间)",
+    "capacity": "(?:刚好|轻松)(?:能)?(?:放下|装下)|(?:所有|全部)钥匙.{0,6}(?:收|装|放)|(?:收|装|放).{0,6}(?:所有|全部)钥匙",
+    "touch": "摸着.{0,4}(?:软|硬|滑)|软乎乎|手感.{0,8}温和",
+    "experience": "自从(?:入手|买|用)|用上才|入手了|买回来|用了.{0,6}(?:天|周|月)|以前.{0,20}用上",
+    "effect": "再也不用|现在找钥匙|出门从容多了|一下子就能摸到|解决.{0,8}(?:大麻烦|小烦躁)|(?:也就|只要|只需|仅需)[一二三四五六七八九十两0-9]+秒"
+  }
+}
